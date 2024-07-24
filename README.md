@@ -41,6 +41,8 @@ wrap or clipping.
 ![Image](images/seismo.JPG) A mockup of a seismograph screen on an ePaper
 display.
 
+![Image](images/round.JPG) Circular display using gc9a01 controller.
+
 # Contents
 
  1. [Introduction](./README.md#1-introduction)  
@@ -72,7 +74,8 @@ display.
   3.7 [Class Textbox](./README.md#37-class-textbox) Scrolling text display.  
  4. [ESP8266](./README.md#4-esp8266) This can work. Contains information on
  minimising the RAM and flash footprints of the GUI.  
-[Appendix 1 Freezing bytecode](./README.md#appendix-1-freezing-bytecode) Optional way to save RAM.
+[Appendix 1 Freezing bytecode](./README.md#appendix-1-freezing-bytecode) Optional way to save RAM.  
+[Appendix 2 Round displays](./README.md#appendix-2-round-displays) Alternative hardware check script.
 
 #### [Supported displays](./DISPLAYS.md)
 
@@ -122,6 +125,7 @@ my GUI's employ the American spelling of `color`.
 
 ## 1.1 Change log
 
+22 May 2024 Support circular displays with gc9a01 controller.
 15 Mar 2023 Driver update to 4.2 inch Waveshare ePpaper display.  
 12 Feb 2023 Add support for sh1106 driver. Fix color compatibility of SSD1306.  
 5 Sep 2022 Add support for additional Pico displays.  
@@ -295,6 +299,7 @@ Demos for larger displays.
  * `asnano_sync.py` Two Pyboard specific demos using the GUI with `asyncio`.
  * `asnano.py` Could readily be adapted for other targets.
  * `tbox.py` Demo `Textbox` class. Cross-platform.
+ * `round.py` Demo for 240*240 circular displays.
 
 Demos for ePaper displays:
  * `epd_async.py` Demo of asynchronous code on an eInk display. Needs a large display.
@@ -405,6 +410,9 @@ ssd.rect(0, 0, 15, 15, RED)  # Red square at top left
 ssd.rect(ssd.width -15, ssd.height -15, 15, 15, BLUE)  # Blue square at bottom right
 refresh(ssd)
 ```
+For round displays please see
+[Appendix 2 Round displays](./README.md#appendix-2-round-displays) for a
+suitable hardware check script.
 
 ###### [Contents](./README.md#contents)
 
@@ -455,7 +463,7 @@ wri = CWriter(ssd, arial10, GREEN, BLACK, verbose=False)  # Colors are defaults
 wri.set_clip(True, True, False)
 ```
 
-Initialisation of monochorome text display follows. For each font a `Writer` instance
+Initialisation of monochrome text display follows. For each font a `Writer` instance
 is created:
 ```python
 from gui.core.writer import Writer  # Renders color text
@@ -1022,4 +1030,24 @@ changes. I also keep the display driver and `boolpalette.py` in the filesystem
 as I have experienced problems freezing display drivers - but feel free to
 experiment.
 
+###### [Contents](./README.md#contents)
+
+## Appendix 2 Round displays
+
+The normal test script is unsuitable as the rectangles are off-screen. Please
+paste this at the REPL to verify hardware and display orientation:
+```Python
+from color_setup import ssd  # Create a display instance
+from gui.core.colors import RED, BLUE, GREEN
+from gui.core.nanogui import refresh, circle
+refresh(ssd, True)  # Initialise and clear display.
+ssd.fill(0)
+w = ssd.width
+ssd.line(0, 0, w - 1, w - 1, GREEN)  # Green diagonal corner-to-corner
+offs = round(0.29289 * w / 2)
+ssd.rect(offs, offs, 15, 15, RED)  # Red square at top left
+ssd.rect(w - offs - 15, w - offs - 15, 15, 15, BLUE)  # Blue square at bottom right
+circle(ssd, 119, 119, 119, GREEN)
+refresh(ssd)
+```
 ###### [Contents](./README.md#contents)

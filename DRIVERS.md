@@ -1,7 +1,8 @@
 # Display drivers
 
 These drivers support [nano-gui](./README.md), [micro-gui](https://github.com/peterhinch/micropython-micro-gui),
-and [Writer and CWriter](https://github.com/peterhinch/micropython-font-to-py/blob/master/writer/WRITER.md).
+[micropython-touch](https://github.com/peterhinch/micropython-touch) and
+[Writer and CWriter](https://github.com/peterhinch/micropython-font-to-py/blob/master/writer/WRITER.md).
 They currently support four display technologies: OLED (color and monochrome),
 color TFT, monochrome Sharp displays and EPD (ePaper/eInk).
 All drivers provide a display class subclassed from the built-in
@@ -9,7 +10,10 @@ All drivers provide a display class subclassed from the built-in
  * Graphics via the `FrameBuffer` graphics primitives.
  * Text rendering in arbitrary fonts via `Writer` and `Cwriter` classes (see
  [font_to_py.py](https://github.com/peterhinch/micropython-font-to-py.git)).
- * Use with nano-gui and [micro-gui](https://github.com/peterhinch/micropython-micro-gui/).
+ * Use with nano-gui, [micro-gui](https://github.com/peterhinch/micropython-micro-gui/)
+ and [micropython-touch](https://github.com/peterhinch/micropython-touch).
+ * Photo image display in conjunction with any of the above GUI's: see
+ [IMAGE_DISPLAY.md](./IMAGE_DISPLAY.md) (on selected larger displays).
 
 It should be noted that in the interests of conserving RAM these drivers offer
 a bare minimum of functionality required to support the above. Most drivers
@@ -42,6 +46,7 @@ access via the `Writer` and `CWriter` classes is documented
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.3.3 [Waveshare Pico LCD 2](./DRIVERS.md#333-waveshare-pico-lcd-2)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3.3.4 [Troubleshooting](./DRIVERS.md#334-troubleshooting)  
   3.4 [Driver for ILI94xx](./DRIVERS.md#34-driver-for-ili94xx) Generic ILI94xx and HX8357D driver for large displays.  
+  3.5 [Driver for gc9a01](./DRIVERS.md#35-driver-for-gc9a01) Round 240x240 displays.  
  4. [Drivers for sharp displays](./DRIVERS.md#4-drivers-for-sharp-displays) Large low power monochrome displays  
   4.1 [Display characteristics](./DRIVERS.md#41-display-characteristics)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4.1.1 [The VCOM bit](./DRIVERS.md#411-the-vcom-bit)  
@@ -72,6 +77,7 @@ access via the `Writer` and `CWriter` classes is documented
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;5.3.3 [Events](./DRIVERS.md#533-events)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;5.3.4 [Public bound variables](./DRIVERS.md#534-public-bound-variables)  
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;5.3.5 [The Greyscale Driver](./DRIVERS.md#535-the-greyscale-driver)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;5.3.6 [Current consumption](./DRIVERS.md#536-current-consumption)  
  6. [EPD Asynchronous support](./DRIVERS.md#6-epd-asynchronous-support)  
  7. [Writing device drivers](./DRIVERS.md#7-writing-device-drivers)  
  8. [Links](./DRIVERS.md#8-links)  
@@ -811,6 +817,89 @@ The driver is quite minimal. Drivers released by display manufacturers set up
 the controller to achieve precise color rendering. With a 4-bit palette these
 consume bytes with zero visual benefit.
 
+## 3.5 Driver for gc9a01
+
+This chip is used on 240x240 pixel circular displays. While all pixels are
+accessible, only those in a 240 pixel diameter circle are visible. The
+`color_setup.py` file should initialise the SPI bus. Args polarity, phase, bits,
+firstbit are defaults. Hard or soft SPI may be used but hard may be faster.
+Clock rates up to 100MHz are supported according to the chip datasheet section
+7.3.4, but high speeds are sensitive to  electrical issues such as lead lengths,
+PCB layout and grounding. I have run 33MHz without issue.
+
+Two versions are provided:
+* `gc9a01.py` 4-bit driver, frame buffer requires 28,800 bytes of RAM.
+* `gc9a01_8_bit.py` 8-bit driver, requires 57,600 bytes.
+
+For use with the three GUI options the 4-bit version is normally preferred. The
+8-bit version allows more colors to be displayed on any given screen. Both have
+identical constructor args and method.
+
+#### GC9A01 Constructor args:
+
+ * `spi` An initialised SPI bus instance.
+ * `cs` An initialised output pin. Initial value should be 1.
+ * `dc` An initialised output pin. Initial value should be 0.
+ * `rst` An initialised output pin. Initial value should be 1.
+ * `height=240` Display dimensions in pixels.
+ * `width=240`
+ * `lscape=False` If `True`, display is rotated 90° (Landscape mode).
+ * `usd=False` Upside down: if `True` display is inverted.
+ * `mirror=False` If `True` a mirror-image is displayed
+ * `init_spi=False` For shared SPI bus applications. See note below.
+
+ #### Method
+
+ * `greyscale(gs=None)` Setting `gs=True` enables the screen to be used to show
+a full screen monochrome image. By default the frame buffer contents are
+interpreted as color values. In greyscale mode the contents are treated as
+greyscale  values. This mode persists until the method is called with
+`gs=False`. The method returns the current greyscale state. It is possible to
+superimpose widgets on an image, but the mapping of colors onto the greyscale
+may yield unexpected shades of grey. `WHITE` and `BLACK` work well. In
+ [micro-gui](https://github.com/peterhinch/micropython-micro-gui) and
+ [micropython-touch](https://github.com/peterhinch/micropython-touch) the
+ `after_open` method should be used to render the image to the framebuf and to
+ overlay any widgets.
+
+#### Shared SPI bus
+
+This optional arg enables flexible options in configuring the SPI bus. The
+default assumes exclusive access to the bus. In this normal case,
+`color_setup.py` initialises it and the settings are left in place. If the bus
+is shared with devices which require different settings, a callback function
+should be passed. It will be called prior to each SPI bus write. The callback
+will receive a single arg being the SPI bus instance. It will typically be a
+one-liner or lambda initialising the bus to be suitable for the GC9A01. A
+minimal example is this function:
+
+```py
+def spi_init(spi):
+    spi.init(baudrate=33_000_000)
+```
+#### Use with asyncio
+
+A full refresh blocks for ~70ms, measured on RP2 with 30MHz hard SPI and
+standard clock. This is reduced to 61ms at 250MHz clock. If this is acceptable,
+no special precautions are required. However this period may be unacceptable for
+some asyncio applications. The driver provides an asynchronous
+`do_refresh(split=4)` method. If this is run the display will be refreshed, but
+will periodically yield to the scheduler enabling other tasks to run. This is
+documented [here](./ASYNC.md).
+[micro-gui](https://github.com/peterhinch/micropython-micro-gui) and
+[micropython-touch](https://github.com/peterhinch/micropython-touch) use this
+automatically.
+
+#### Driver design note
+
+The display setup is based on [this driver](https://github.com/russhughes/gc9a01_mpy/)
+by Russ Hughes. It uses a number of undocumented registers. Under test the
+initialisation of most of these registers could be commented out without obvious
+effects, however two of them were necessary to avoid display corruption. All the
+calls were left in place with appropriate code comments. The source of the code
+in question was unclear. Russ Hughes indicated that it probably originated with
+a display manufacturer.
+
 ###### [Contents](./DRIVERS.md#contents)
 
 # 4. Drivers for sharp displays
@@ -1087,7 +1176,6 @@ needed in more advanced asynchronous applications and their use is discussed in
  modify widgets without risk of display corruption.
  * `complete` Set when display update is complete. It is now safe to call
  `ssd.refresh()`.
- EPD.
 
 ### 5.1.4 Public bound variables
 
@@ -1291,23 +1379,48 @@ before issuing another refresh.
 
 ## 5.3 Waveshare 400x300 Pi Pico display
 
-There are two drivers for this display:
+This display has excellent support for partial updates which are fast and
+visually unobtrusive. They have the drawback of "ghosting" where remnants of the
+previous image are visible. At any time a full update may be performed which
+removes all trace of ghosting. This model of display has low levels of ghosting
+and thus is supported by micro-gui. The model supports hosts other than the Pico
+via a supplied cable.
+
+Two versions of this display exist. They require different drivers. The type of
+a board may be distinguished as below, with the V2 board being the second
+image:  
+![Image](images/V1_EPD.JPG)  
+V1 board.  
+
+![Image](images/V2_EPD.JPG)  
+V2 board.
+
+There are two drivers for the V1 display:
  1. `pico_epaper_42.py` 1-bit black/white driver supports partial updates.
  2. `pico_epaper_42_gs.py` 2-bit greyscale driver. No partial updates.
 
-The drivers have identical args and methods.
+ Currently the V2 display has only a 1-bit driver, contributed by Michael
+ Surdouski. It supports partial updates.
+ 1. `pico_epaper_42_v2.py`
 
-This 4.2" display supports a Pi Pico or Pico W plugged into the rear of the
+All drivers have identical args and methods.
+
+The 4.2" displays support a Pi Pico or Pico W plugged into the rear of the
 unit. Alternatively it can be connected to any other host using the supplied
-cable. With a Pico variant the `color_setup` file is very simple:
+cable. With a Pico variant plugged in the `color_setup` file is very simple:
 ```python
 import machine
 import gc
-from drivers.epaper.pico_epaper_42 import EPD as SSD
+from drivers.epaper.pico_epaper_42_v2 import EPD as SSD  # V2 driver
 
 gc.collect()  # Precaution before instantiating framebuf.
 ssd = SSD()  # Create a display instance based on a Pico in socket.
 ```
+##### Frozen bytecode
+
+In testing the V2 driver failed when implemented as frozen bytecode. It worked
+when pre-compiled to a `.mpy` file. The reason for this is unclear.
+
 ### 5.3.1 Constructor args
 
 For other hosts the pins need to be specified in `color_setup.py` via the
@@ -1319,36 +1432,39 @@ following constructor args:
  * `rst=None` A `Pin` instance defined as `Pin.OUT`.
  * `busy=None` A `Pin` instance defined as `Pin.IN, Pin.PULL_UP`.
 
-The `asyn` arg has been removed: the driver now detects asynchronous use.
-
 ### 5.3.2 Public methods
 
-All methods are synchronous.
+All methods are synchronous. Common API (nanogui and microgui):
 
-* `init` No args. Issues a hardware reset and initialises the hardware. This
- is called by the constructor. It needs to explicitly be called to exit from a
- deep sleep.
- * `sleep` No args. Puts the display into deep sleep. If called while a refresh
- is in progress it will block until the refresh is complete. `sleep` should be
- called before a power down to avoid leaving the display in an abnormal state.
- * `ready` No args. After issuing a `refresh` the device will become busy for
- a period: `ready` status should be checked before issuing `refresh`.
- * `wait_until_ready` No args. Pause until the device is ready.
  * `set_partial()` Enable partial updates (does nothing on greyscale driver).
  * `set_full()` Restore normal update operation (null on greyscale driver).
 
-On the 1-bit driver, after issuing `set_partial()`, subsequent updates will be
-partial. Normal updates are restored by issuing `set_full()`. These methods
-should not be issued while an update is in progress.
+ On the 1-bit driver, after issuing `set_partial()`, subsequent updates will be
+ partial. Normal updates are restored by issuing `set_full()`. These methods
+ should not be issued while an update is in progress. In the case of synchronous
+ applications, issue `.wait_until_ready`. Asynchronous and microgui applications
+ should wait on the `rfsh_done` event.
 
-Partial updates are fast and visually unobtrusive but they are prone to
-ghosting.
+Nanogui API:
+
+ * `sleep` No args. Applications should call this before power down to ensure
+ the display is put into the correct state.
+ * `ready` No args. After issuing a `refresh` the device will become busy for
+ a period: `ready` status should be checked before issuing `refresh`.
+ * `wait_until_ready` No args. Pause until the device is ready. This should be
+ run before issuing `refresh` or `sleep`.
+ * `init` No args. Issues a hardware reset and initialises the hardware. This
+ is called by the constructor. It may be used to recover from a `sleep` state
+ but this is not recommended for V2 displays (see note on current consumption).
 
 ### 5.3.3 Events
 
 These provide synchronisation in asynchronous applications. They are only
 needed in more advanced asynchronous applications and their use is discussed in
-[EPD Asynchronous support](./DRIVERS.md#6-epd-asynchronous-support).
+[EPD Asynchronous support](./DRIVERS.md#6-epd-asynchronous-support). They are
+necessary in microgui applications to synchronise changes between partial and
+full refrresh modes. See
+[this demo](https://github.com/peterhinch/micropython-micro-gui/blob/main/gui/demos/epaper.py).
  * `updated` Set when framebuf has been copied to device. It is now safe to
  modify widgets without risk of display corruption.
  * `complete` Set when display update is complete. It is now safe to call
@@ -1362,6 +1478,14 @@ needed in more advanced asynchronous applications and their use is discussed in
  will block until display update is complete, and then for a further two
  seconds to enable viewing. This enables generic nanogui demos to be run on an
  EPD.
+
+ The following are intended for use in micro-gui applications:
+
+ * `maxblock=25` Defines the maximum period (in ms) that the asynchronous
+ refresh can block before yielding to the scheduler.
+ * `blank_on_exit=True` On application shutdown by default the display is
+ cleared. Setting this `False` overrides this, leaving the display contents in
+ place.
 
 Note that in synchronous applications with `demo_mode=False`, `refresh` returns
 while the display is updating. Applications should issue `wait_until_ready`
@@ -1390,6 +1514,20 @@ ssd.fill_rect(0, 90, 15, 15, 3)  # Black
 refresh(ssd)
 ```
 Color values of 0 (white) to 3 (black) can explicitly be specified.
+
+### 5.3.6 Current consumption
+
+This was measured on a V2 display. The Waveshare driver has a `sleep` method
+which claims to put the device into a deep sleep mode. Their docs indicate a
+sleep current of 0.01μA. This was not borne out by measurement:
+* ~5mA while doing a full update.
+* ~1.2mA while running the micro-gui epaper.py demo. This performs continuous
+partial updates.
+* 92μA while inactive.
+* 92μA after running `.sleep`.
+Conclusion: there is no reason to call `.sleep` other than in preparation for a
+shutdown, consequently the method is not provided. I believe the discrepancy is
+caused by the supply current of the level translator.
 
  ###### [Contents](./DRIVERS.md#contents)
 
